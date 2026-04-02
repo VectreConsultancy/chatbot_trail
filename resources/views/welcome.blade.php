@@ -148,6 +148,43 @@
             border-radius: 999px;
         }
 
+        .quick-panel {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.28);
+        }
+
+        .quick-title {
+            font-size: 0.78rem;
+            color: var(--text-soft);
+            margin-bottom: 8px;
+            letter-spacing: 0.2px;
+        }
+
+        .question-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .question-chip {
+            border: 1px solid rgba(255, 120, 120, 0.28);
+            background: rgba(32, 12, 12, 0.85);
+            color: #ffdede;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 0.76rem;
+            line-height: 1.15;
+            cursor: pointer;
+            transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
+        }
+
+        .question-chip:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 97, 97, 0.6);
+            background: rgba(60, 12, 12, 0.9);
+        }
+
         .msg {
             max-width: 78%;
             padding: 11px 14px;
@@ -243,6 +280,46 @@
             50% { opacity: 1; }
         }
 
+        .feedback-row {
+            align-self: flex-start;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: -4px;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
+            color: var(--text-soft);
+        }
+
+        .feedback-row button {
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(22, 22, 22, 0.92);
+            color: #f5f5f5;
+            border-radius: 8px;
+            padding: 5px 10px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+
+        .feedback-row button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .related-row {
+            align-self: flex-start;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            margin-top: -2px;
+            margin-bottom: 6px;
+        }
+
+        .related-row .feedback-label {
+            font-size: 0.78rem;
+            color: var(--text-soft);
+        }
+
         @media (max-width: 640px) {
             .chat-wrap {
                 height: 100vh;
@@ -265,6 +342,11 @@
             <div class="status"><span class="dot"></span>Online</div>
         </header>
 
+        <section class="quick-panel">
+            <div class="quick-title">Quick Questions</div>
+            <div id="quickQuestions" class="question-chips"></div>
+        </section>
+
         <main id="chatBody" class="chat-body">
             <div class="msg assistant">Welcome. I answer from your indexed manual using top-matching chunks for best response.</div>
         </main>
@@ -280,7 +362,13 @@
         const input = document.getElementById('chatText');
         const sendBtn = document.getElementById('sendBtn');
         const chatBody = document.getElementById('chatBody');
+        const quickQuestions = document.getElementById('quickQuestions');
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const routes = {
+            stream: '{{ route('chat.stream') }}',
+            feedback: '{{ route('chat.feedback') }}',
+            suggestions: '{{ route('chat.suggestions') }}',
+        };
         const conversation = [
             { role: 'assistant', content: 'Welcome. I answer from your indexed manual using top-matching chunks for best response.' }
         ];
@@ -295,9 +383,131 @@
             return bubble;
         };
 
+        const createQuestionChip = (question, onClick) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'question-chip';
+            btn.textContent = question;
+            btn.addEventListener('click', () => onClick(question));
+            return btn;
+        };
+
+        const renderQuickQuestions = (questions) => {
+            quickQuestions.innerHTML = '';
+
+            questions.forEach((question) => {
+                quickQuestions.appendChild(createQuestionChip(question, sendMessage));
+            });
+        };
+
+        const addRelatedQuestionsRow = (questions) => {
+            if (!Array.isArray(questions) || questions.length === 0) return;
+
+            const row = document.createElement('div');
+            row.className = 'related-row';
+
+            const label = document.createElement('span');
+            label.className = 'feedback-label';
+            label.textContent = 'Related questions:';
+
+            const chipsWrap = document.createElement('div');
+            chipsWrap.className = 'question-chips';
+
+            questions.slice(0, 5).forEach((question) => {
+                chipsWrap.appendChild(createQuestionChip(question, sendMessage));
+            });
+
+            row.appendChild(label);
+            row.appendChild(chipsWrap);
+            chatBody.appendChild(row);
+            chatBody.scrollTop = chatBody.scrollHeight;
+        };
+
         const setLoading = (loading) => {
             input.disabled = loading;
             sendBtn.disabled = loading;
+        };
+
+        const submitFeedback = async (responseId, helpful, row, yesBtn, noBtn) => {
+            yesBtn.disabled = true;
+            noBtn.disabled = true;
+
+            try {
+                const res = await fetch(routes.feedback, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken
+                    },
+                    body: JSON.stringify({
+                        response_id: responseId,
+                        helpful
+                    })
+                });
+
+                if (!res.ok) {
+                    throw new Error('Feedback failed');
+                }
+
+                const payload = await res.json().catch(() => ({}));
+                row.querySelector('.feedback-label').textContent = payload.message || (helpful ? 'Marked helpful' : 'Marked not helpful');
+            } catch {
+                row.querySelector('.feedback-label').textContent = 'Feedback save failed';
+                yesBtn.disabled = false;
+                noBtn.disabled = false;
+            }
+        };
+
+        const addFeedbackRow = (responseId) => {
+            if (!responseId) return;
+
+            const row = document.createElement('div');
+            row.className = 'feedback-row';
+
+            const label = document.createElement('span');
+            label.className = 'feedback-label';
+            label.textContent = 'Helpful?';
+
+            const yesBtn = document.createElement('button');
+            yesBtn.type = 'button';
+            yesBtn.textContent = 'Yes';
+
+            const noBtn = document.createElement('button');
+            noBtn.type = 'button';
+            noBtn.textContent = 'No';
+
+            yesBtn.addEventListener('click', () => submitFeedback(responseId, true, row, yesBtn, noBtn));
+            noBtn.addEventListener('click', () => submitFeedback(responseId, false, row, yesBtn, noBtn));
+
+            row.appendChild(label);
+            row.appendChild(yesBtn);
+            row.appendChild(noBtn);
+            chatBody.appendChild(row);
+            chatBody.scrollTop = chatBody.scrollHeight;
+        };
+
+        const loadQuickQuestions = async (query = '') => {
+            try {
+                const url = new URL(routes.suggestions, window.location.origin);
+                if (query) {
+                    url.searchParams.set('q', query);
+                }
+
+                const res = await fetch(url.toString(), {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (!res.ok) return;
+
+                const payload = await res.json();
+                if (Array.isArray(payload.questions) && payload.questions.length > 0) {
+                    renderQuickQuestions(payload.questions);
+                }
+            } catch {
+                // Ignore suggestions failures silently.
+            }
         };
 
         const extractSsePayloads = (buffer) => {
@@ -323,9 +533,8 @@
             return { payloads, buffer };
         };
 
-        form.addEventListener('submit', async function (event) {
-            event.preventDefault();
-            const text = input.value.trim();
+        const sendMessage = async (rawText) => {
+            const text = rawText.trim();
             if (!text || sendBtn.disabled) return;
 
             addMessage(text, 'user');
@@ -335,9 +544,11 @@
 
             const assistantBubble = addMessage('', 'assistant', true);
             let assistantText = '';
+            let responseId = null;
+            let relatedQuestions = [];
 
             try {
-                const response = await fetch('{{ route('chat.stream') }}', {
+                const response = await fetch(routes.stream, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -381,6 +592,11 @@
                             assistantBubble.textContent = assistantText;
                             chatBody.scrollTop = chatBody.scrollHeight;
                         }
+
+                        if (eventData.type === 'response_meta') {
+                            responseId = eventData.response_id;
+                            relatedQuestions = Array.isArray(eventData.related_questions) ? eventData.related_questions : [];
+                        }
                     }
                 }
 
@@ -392,14 +608,24 @@
                 }
 
                 conversation.push({ role: 'assistant', content: assistantText });
+                addFeedbackRow(responseId);
+                addRelatedQuestionsRow(relatedQuestions);
+                loadQuickQuestions(text);
             } catch (error) {
                 assistantBubble.classList.remove('streaming');
-                assistantBubble.textContent = error.message || 'Error connecting to AI. Please verify API key and try again.';
+                assistantBubble.textContent = error.message || 'Error generating response. Please try again.';
             } finally {
                 setLoading(false);
                 input.focus();
             }
+        };
+
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            await sendMessage(input.value);
         });
+
+        loadQuickQuestions();
     </script>
 </body>
 </html>

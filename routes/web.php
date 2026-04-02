@@ -8,3 +8,5 @@ Route::get('/', function () {
 });
 
 Route::post('/chat/stream', [ChatController::class, 'stream'])->name('chat.stream');
+Route::post('/chat/feedback', [ChatController::class, 'feedback'])->name('chat.feedback');
+Route::get('/chat/suggestions', [ChatController::class, 'suggestions'])->name('chat.suggestions');

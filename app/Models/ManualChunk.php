@@ -11,5 +11,13 @@ class ManualChunk extends Model
         'source_hash',
         'chunk_order',
         'content',
+        'metadata',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'metadata' => 'array',
+        ];
+    }
 }
